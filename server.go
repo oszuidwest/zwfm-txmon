@@ -16,6 +16,7 @@ import (
 )
 
 type server struct {
+	cfg      Config
 	settings *settings
 	mon      *Monitor
 	sessions *sessions
@@ -30,7 +31,7 @@ type pageData struct {
 }
 
 func newServer(st *settings, mon *Monitor) *server {
-	return &server{settings: st, mon: mon, sessions: newSessions(), pages: template.Must(template.ParseFS(webFS, "web/*.html"))}
+	return &server{cfg: st.get(), settings: st, mon: mon, sessions: newSessions(), pages: template.Must(template.ParseFS(webFS, "web/*.html"))}
 }
 
 func (s *server) routes() http.Handler {
@@ -87,7 +88,7 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) page(w http.ResponseWriter, status int, name string, d *pageData) {
-	d.Name, d.Version, d.Year = s.settings.get().Name, Version, time.Now().Year()
+	d.Name, d.Version, d.Year = s.cfg.Name, Version, time.Now().Year()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
@@ -123,8 +124,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?expired=1", http.StatusSeeOther)
 		return
 	}
-	cfg := s.settings.get()
-	ok, limited := s.sessions.login(w, r, r.PostForm.Get("username"), r.PostForm.Get("password"), &cfg)
+	ok, limited := s.sessions.login(w, r, r.PostForm.Get("username"), r.PostForm.Get("password"), &s.cfg)
 	if limited {
 		slog.Warn("login rate limited", "remote", clientIP(r))
 		s.loginPage(w, r, http.StatusTooManyRequests, &pageData{Error: "Too many attempts. Try again in a few minutes."})
