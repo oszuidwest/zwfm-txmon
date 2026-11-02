@@ -1,0 +1,6 @@
+/txmon
+/dist/
+/config.json
+.DS_Store
+/dev.json
+/node_modules

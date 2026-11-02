@@ -1,0 +1,37 @@
+version: "2"
+
+linters:
+  enable:
+    - gocritic
+    - gocyclo
+    - godot
+    - godoclint
+    - dupword
+    - misspell
+    - errorlint
+    - gosec
+    - nilerr
+    - unparam
+    - unconvert
+    - bodyclose
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    gocyclo:
+      min-complexity: 20
+    godot:
+      scope: toplevel
+  exclusions:
+    rules:
+      # The simulated I2C slave is one state machine on purpose.
+      - path: _test\.go
+        linters:
+          - gocyclo
+      # The kernel GPIO and I2C interfaces need unsafe pointers to their ioctl structs.
+      - path: internal/i2c/.*_linux\.go
+        text: G103
+        linters:
+          - gosec

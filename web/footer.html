@@ -1,0 +1,14 @@
+<!-- htmlhint doctype-first:false -->
+{{define "footer"}}
+<footer class="footer">
+    <div class="links">
+        <a rel="noopener" href="https://github.com/oszuidwest/zwfm-txmon" title="View source on GitHub" target="_blank">
+            <span id="github-icon" class="icon-container" x-html="icons.github"></span>
+            GitHub
+        </a>
+        <span class="sep">|</span>
+        <span>Version <span class="version">{{.Version}}</span></span>
+    </div>
+    <div class="copyright">© {{.Year}} Streekomroep ZuidWest • MIT License</div>
+</footer>
+{{end}}

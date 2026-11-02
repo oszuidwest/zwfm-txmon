@@ -1,0 +1,616 @@
+<!-- htmlhint input-requires-label:false -->
+<!DOCTYPE html>
+<html lang="en">
+<!-- txmonApp in app.js owns Alpine state; it polls /api/status every second. -->
+<!-- Line 1 turns off input-requires-label: Alpine binds the ids of inputs in loops (:id/:for), which htmlhint cannot see. -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="description" content="{{.Name}} - TEX transmitter monitor">
+    <meta name="csrf-token" content="{{.CSRF}}">
+    <title>{{.Name}}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="canonical" href="/">
+    <link rel="stylesheet" href="/style.css">
+    <script src="/icons.js" defer="defer"></script>
+    <script src="/app.js" defer="defer"></script>
+    <script src="/alpine.min.js" defer="defer"></script>
+</head>
+<body x-data="txmonApp">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+
+    <!-- Connection overlay - blocks UI while txmon does not answer -->
+    <div class="connection-overlay" x-show="!connected" x-cloak>
+        <div class="content">
+            <div class="loading">Connecting...</div>
+        </div>
+    </div>
+
+    <!-- Alert banner - page-wide header for request failures -->
+    <div class="alert-banner"
+         role="alert"
+         aria-live="assertive"
+         x-show="banner.visible"
+         x-transition:enter="banner-enter"
+         x-transition:leave="banner-leave"
+         :data-variant="banner.type"
+         x-cloak>
+        <span class="message" x-text="banner.message"></span>
+    </div>
+
+    <!-- Transmitter banner - link loss or active alarms, persistent -->
+    <div class="alert-banner"
+         data-variant="danger"
+         role="alert"
+         aria-live="assertive"
+         x-show="connected && alertMessage()"
+         x-transition:enter="banner-enter"
+         x-transition:leave="banner-leave"
+         x-cloak>
+        <span class="message" x-text="alertMessage()"></span>
+    </div>
+
+    <!-- Toast notifications - transient feedback for user actions -->
+    <div class="toast-container" aria-live="polite" x-cloak>
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="toast"
+                 :data-type="toast.type"
+                 x-transition:enter="toast-enter"
+                 x-transition:leave="toast-leave">
+                <span class="toast-icon" x-html="toast.type === 'success' ? icons.check : toast.type === 'error' ? icons.warning : icons.info"></span>
+                <span x-text="toast.message"></span>
+            </div>
+        </template>
+    </div>
+
+    <main id="main-content" class="container" tabindex="-1">
+        <noscript>
+            <p class="noscript-message">This application requires JavaScript to function.</p>
+        </noscript>
+
+        <!-- Dashboard -->
+        <div id="dashboard-view" x-show="view === 'dashboard'" x-cloak>
+            <header class="app-header">
+                <div class="brand">
+                    <span class="logo" x-html="icons.appLogo"></span>
+                    <h1 class="title">{{.Name}}</h1>
+                </div>
+                <div class="actions">
+                    <button class="icon-btn" type="button" title="Settings" aria-label="Settings" @click="showSettings()">
+                        <span class="icon-container" x-html="icons.settings"></span>
+                    </button>
+                    <button class="icon-btn" type="button" title="Sign out" aria-label="Sign out" @click="signOut()">
+                        <span class="icon-container" x-html="icons.logout"></span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Output -->
+            <section class="card">
+                <div class="header" data-theme="brand">
+                    <h2>Transmitter</h2>
+                    <span class="badge" x-text="onAirLabel()"></span>
+                </div>
+                <div class="body">
+                    <div class="power">
+                        <span class="power-value" x-text="tx ? fmt(tx.forward_power_w, 1) : '–'"></span>
+                        <span class="power-unit">W</span>
+                    </div>
+                    <p class="power-caption" x-text="tx ? `Forward power · target ${tx.target_power_pct} %` : 'Waiting for the first reading'"></p>
+                    <div class="readings-grid">
+                        <div class="reading">
+                            <span class="reading-label">Reflected</span>
+                            <span class="reading-value"><span x-text="tx ? fmt(tx.reflected_power_w, 1) : '–'"></span><span class="reading-unit">W</span></span>
+                        </div>
+                        <div class="reading">
+                            <span class="reading-label">Frequency</span>
+                            <span class="reading-value"><span x-text="tx ? fmt(tx.frequency_mhz, 2) : '–'"></span><span class="reading-unit">MHz</span></span>
+                        </div>
+                        <div class="reading">
+                            <span class="reading-label">Temperature</span>
+                            <span class="reading-value"><span x-text="tx ? tx.temperature_c : '–'"></span><span class="reading-unit">°C</span></span>
+                        </div>
+                    </div>
+                    <div class="flags" x-show="tx">
+                        <template x-for="f in flags()" :key="f.label">
+                            <span class="flag"><span class="flag-dot" :class="f.cls"></span><span x-text="f.label"></span></span>
+                        </template>
+                    </div>
+                    <p class="updated" x-show="tx" x-text="`Address ${status.address} · updated ${ago(status.updated)}`"></p>
+                </div>
+            </section>
+
+            <!-- Alarms -->
+            <section class="card">
+                <div class="header" data-theme="slate">
+                    <h2>Alarms</h2>
+                    <span class="badge" x-show="activeAlarms().length > 0" x-text="`${activeAlarms().length} active`"></span>
+                </div>
+                <div class="body">
+                    <div class="outputs">
+                        <template x-if="enabledAlarms().length === 0">
+                            <div class="empty-state">No alarms enabled</div>
+                        </template>
+                        <template x-for="a in enabledAlarms()" :key="a.key">
+                            <div class="item">
+                                <div class="row">
+                                    <span class="dot" :class="stateClass(a.state)"></span>
+                                    <span class="host" x-text="defLabel(a.key)"></span>
+                                    <span class="status" :class="stateClass(a.state)" x-text="STATE_LABELS[a.state]"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Measurements -->
+            <section class="card">
+                <div class="header" data-theme="slate">
+                    <h2>Measurements</h2>
+                </div>
+                <div class="body">
+                    <dl class="readings">
+                        <template x-for="m in measurements()" :key="m.label">
+                            <div class="readings-row">
+                                <dt x-text="m.label"></dt>
+                                <dd x-text="m.value"></dd>
+                            </div>
+                        </template>
+                    </dl>
+                </div>
+            </section>
+
+            <!-- Control -->
+            <section class="card">
+                <div class="header" data-theme="slate">
+                    <h2>Control</h2>
+                </div>
+                <div class="body">
+                    <div class="form">
+                        <div class="group">
+                            <label>RF Output</label>
+                            <div class="segmented segmented--neutral" role="group" aria-label="RF output">
+                                <button type="button" class="segmented-btn" :aria-pressed="(!!tx && !tx.on_air).toString()" :disabled="!canControl()" @click="setRF(false)">Off</button>
+                                <button type="button" class="segmented-btn" :aria-pressed="(!!tx && tx.on_air).toString()" :disabled="!canControl()" @click="setRF(true)">On Air</button>
+                            </div>
+                        </div>
+                        <div class="group">
+                            <label for="target-power">Target Power</label>
+                            <div class="copy-field">
+                                <div class="input-group">
+                                    <input id="target-power" type="number" min="0" :max="tx && tx.firmware < 201 ? 100 : 120" step="1" :placeholder="tx ? tx.target_power_pct : ''" x-model.number="control.power" @keydown.enter.prevent="setPower()" aria-describedby="target-power-hint">
+                                    <span class="input-unit">%</span>
+                                </div>
+                                <button class="btn" data-variant="secondary" type="button" :disabled="!canControl() || control.power === ''" @click="setPower()">Set</button>
+                            </div>
+                            <span id="target-power-hint" class="input-hint" x-text="tx && tx.firmware < 201 ? 'TEX firmware below 201 accepts 0 to 100 %.' : '0 to 120 % of the rated power.'"></span>
+                        </div>
+                        <div class="group">
+                            <label for="frequency">Frequency</label>
+                            <div class="copy-field">
+                                <div class="input-group">
+                                    <input id="frequency" type="text" inputmode="decimal" :placeholder="tx ? fmt(tx.frequency_mhz, 2) : ''" x-model="control.freq" @keydown.enter.prevent="setFrequency()" aria-describedby="frequency-hint">
+                                    <span class="input-unit">MHz</span>
+                                </div>
+                                <button class="btn" data-variant="secondary" type="button" :disabled="!canControl() || !control.freq" @click="setFrequency()">Set</button>
+                            </div>
+                            <span id="frequency-hint" class="input-hint">87.50 to 108.10 MHz in steps of 0.01.</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Settings -->
+        <div id="settings-view" class="settings" x-show="view === 'settings'" x-cloak>
+            <header class="nav">
+                <button class="nav-btn" type="button" @click="cancelSettings()" :disabled="saving">Cancel</button>
+                <h2>Settings</h2>
+                <button class="nav-btn" data-variant="save" type="button" @click="saveSettings()" :disabled="!settingsDirty || saving" x-text="saving ? 'Saving...' : 'Save'">Save</button>
+            </header>
+
+            <!-- Tab changes select a panel without saving configuration. -->
+            <div class="tabs" role="tablist">
+                <template x-for="tab in settingsTabs" :key="tab.id">
+                    <button class="tab" type="button" role="tab" :id="'tab-' + tab.id" :aria-selected="settingsTab === tab.id" :aria-controls="'panel-' + tab.id" :tabindex="settingsTab === tab.id ? 0 : -1" :title="tab.label" @click="showTab(tab.id)">
+                        <span class="icon-container" x-html="icons[tab.icon]"></span>
+                        <span class="label" x-text="tab.label"></span>
+                    </button>
+                </template>
+            </div>
+
+            <div class="panels">
+                <!-- Alarms Panel: the alarms for a TEX -->
+                <div class="panel" role="tabpanel" id="panel-alarms" aria-labelledby="tab-alarms" x-show="settingsTab === 'alarms'">
+                    <template x-if="form">
+                        <div>
+                            <template x-for="def in defs" :key="def.key">
+                                <div class="channel" :class="{ 'channel--open': cardsOpen[def.key] }">
+                                    <button type="button" class="channel-head" @click="toggleCard(def.key)" :aria-expanded="!!cardsOpen[def.key]" :aria-controls="'card-' + def.key">
+                                        <span class="channel-icon icon-container" x-html="icons[alarmIcon(def)]"></span>
+                                        <span class="channel-titles">
+                                            <span class="channel-name" x-text="def.label"></span>
+                                            <span class="channel-summary" x-text="alarmCardStatus(def).summary"></span>
+                                        </span>
+                                        <span class="channel-status"
+                                              x-show="alarmCardStatus(def).pill"
+                                              :class="alarmCardStatus(def).pill?.cls"
+                                              x-text="alarmCardStatus(def).pill?.label"></span>
+                                        <span class="channel-chevron icon-container" x-html="icons.chevronDown" aria-hidden="true"></span>
+                                    </button>
+                                    <div class="channel-body" :id="'card-' + def.key" x-show="cardsOpen[def.key]" x-cloak x-transition:enter="channel-body-enter" x-transition:leave="channel-body-leave">
+                                        <p class="section-desc" x-text="alarmDescription(def)"></p>
+                                        <div class="form">
+                                            <div class="group">
+                                                <label>Alert</label>
+                                                <div class="segmented segmented--neutral" role="group" :aria-label="def.label + ' alert'">
+                                                    <template x-for="mode in alarmModes(def)" :key="mode.id">
+                                                        <button type="button" class="segmented-btn" :aria-pressed="(alarmMode(def) === mode.id).toString()" @click="setAlarmMode(def, mode.id)" x-text="mode.label"></button>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                            <template x-if="def.analog">
+                                                <div x-show="alarmMode(def) !== 'off'">
+                                                    <div class="row">
+                                                        <div class="group" x-show="form.alarms[def.key].low">
+                                                            <label :for="def.key + '-low'">Low Limit</label>
+                                                            <div class="input-group">
+                                                                <input :id="def.key + '-low'" type="number" min="0" step="any" x-model.number="form.alarms[def.key].low_limit" @input="markSettingsDirty()">
+                                                                <span class="input-unit" x-text="def.unit"></span>
+                                                            </div>
+                                                        </div>
+                                                        <div class="group" x-show="form.alarms[def.key].high">
+                                                            <label :for="def.key + '-high'">High Limit</label>
+                                                            <div class="input-group">
+                                                                <input :id="def.key + '-high'" type="number" min="0" step="any" x-model.number="form.alarms[def.key].high_limit" @input="markSettingsDirty()">
+                                                                <span class="input-unit" x-text="def.unit"></span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="row">
+                                                        <div class="group">
+                                                            <label :for="def.key + '-trigger'">Trigger Time</label>
+                                                            <div class="input-group">
+                                                                <input :id="def.key + '-trigger'" type="number" min="3" max="60" step="1" x-model.number="form.alarms[def.key].trigger" @input="markSettingsDirty()" :aria-describedby="def.key + '-trigger-hint'">
+                                                                <span class="input-unit">sec</span>
+                                                            </div>
+                                                            <span :id="def.key + '-trigger-hint'" class="input-hint">Past the limit before alerting.</span>
+                                                        </div>
+                                                        <div class="group">
+                                                            <label :for="def.key + '-release'">Release Time</label>
+                                                            <div class="input-group">
+                                                                <input :id="def.key + '-release'" type="number" min="3" max="60" step="1" x-model.number="form.alarms[def.key].release" @input="markSettingsDirty()" :aria-describedby="def.key + '-release-hint'">
+                                                                <span class="input-unit">sec</span>
+                                                            </div>
+                                                            <span :id="def.key + '-release-hint'" class="input-hint">Back within the limit before clearing.</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                        <div class="test-action">
+                                            <button class="btn" data-variant="secondary" data-size="test" type="button" @click="resetAlarm(def)" :title="'Clear the counter of ' + def.label">Reset counter</button>
+                                            <span class="input-hint" x-text="firedText(def.key)"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Notifications Panel -->
+                <div class="panel" role="tabpanel" id="panel-notifications" aria-labelledby="tab-notifications" x-show="settingsTab === 'notifications'">
+                    <template x-if="form">
+                        <div>
+                            <div class="channel" :class="{ 'channel--open': cardsOpen.webhook }">
+                                <button type="button" class="channel-head" @click="toggleCard('webhook')" :aria-expanded="!!cardsOpen.webhook" aria-controls="channel-webhook">
+                                    <span class="channel-icon icon-container" x-html="icons.link"></span>
+                                    <span class="channel-titles">
+                                        <span class="channel-name">Webhook</span>
+                                        <span class="channel-summary" x-text="notifChannelStatus('webhook').summary"></span>
+                                    </span>
+                                    <span class="channel-status" x-show="notifChannelStatus('webhook').pill" :class="notifChannelStatus('webhook').pill?.cls" x-text="notifChannelStatus('webhook').pill?.label"></span>
+                                    <span class="channel-chevron icon-container" x-html="icons.chevronDown" aria-hidden="true"></span>
+                                </button>
+                                <div class="channel-body" id="channel-webhook" x-show="cardsOpen.webhook" x-cloak x-transition:enter="channel-body-enter" x-transition:leave="channel-body-leave">
+                                    <p class="section-desc">POST request with a JSON body for configured alarms.</p>
+                                    <div class="form">
+                                        <div class="group">
+                                            <label for="webhook-url">Webhook URL</label>
+                                            <input id="webhook-url" type="url" :placeholder="secretPlaceholder('webhook_url', 'https://hooks.example.com/...')" x-model="form.notifications.webhook.url" @input="markSettingsDirty()" :disabled="isClearing('webhook_url')" aria-describedby="webhook-url-hint">
+                                            <span id="webhook-url-hint" class="input-hint">Leave empty to keep, type new value to replace, or click Clear to remove on save.</span>
+                                            <div class="secret-actions">
+                                                <button class="btn" data-variant="danger" data-size="sm" type="button" x-show="secrets.webhook_url && !isClearing('webhook_url')" @click="clearSecret('webhook_url', 'Remove the saved webhook URL on save?')">Clear saved URL</button>
+                                                <button class="btn" data-variant="secondary" data-size="sm" type="button" x-show="isClearing('webhook_url')" @click="undoClearSecret('webhook_url')">Undo clear</button>
+                                            </div>
+                                        </div>
+                                        <div class="group">
+                                            <label>Alarms</label>
+                                            <div class="checkbox-group">
+                                                <template x-for="def in defs" :key="def.key">
+                                                    <label class="checkbox-label"><input type="checkbox" :value="def.key" x-model="form.notifications.webhook.events.alarms" @change="markSettingsDirty()"> <span x-text="def.label"></span></label>
+                                                </template>
+                                                <label class="checkbox-label"><input type="checkbox" x-model="form.notifications.webhook.events.recoveries" @change="markSettingsDirty()"> Recoveries</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="test-action">
+                                        <button class="btn" data-variant="secondary" data-size="test" type="button" @click="sendTest('webhook')" :disabled="testStates.webhook.pending || isClearing('webhook_url')" x-text="testStates.webhook.text">Test</button>
+                                        <span class="input-hint" x-show="isClearing('webhook_url')">Save changes first to test with the cleared URL.</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="channel" :class="{ 'channel--open': cardsOpen.email }">
+                                <button type="button" class="channel-head" @click="toggleCard('email')" :aria-expanded="!!cardsOpen.email" aria-controls="channel-email">
+                                    <span class="channel-icon icon-container" x-html="icons.email"></span>
+                                    <span class="channel-titles">
+                                        <span class="channel-name">Microsoft 365 Email</span>
+                                        <span class="channel-summary" x-text="notifChannelStatus('email').summary"></span>
+                                    </span>
+                                    <span class="channel-status" x-show="notifChannelStatus('email').pill" :class="notifChannelStatus('email').pill?.cls" x-text="notifChannelStatus('email').pill?.label"></span>
+                                    <span class="channel-chevron icon-container" x-html="icons.chevronDown" aria-hidden="true"></span>
+                                </button>
+                                <div class="channel-body" id="channel-email" x-show="cardsOpen.email" x-cloak x-transition:enter="channel-body-enter" x-transition:leave="channel-body-leave">
+                                    <p class="section-desc">Email notifications via Microsoft Graph API for configured alarms.</p>
+                                    <div class="form">
+                                        <div class="row">
+                                            <div class="group">
+                                                <label for="graph-tenant-id">Tenant ID</label>
+                                                <input id="graph-tenant-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" x-model="form.notifications.email.tenant_id" @input="markSettingsDirty()">
+                                            </div>
+                                            <div class="group">
+                                                <label for="graph-client-id">Client ID</label>
+                                                <input id="graph-client-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" x-model="form.notifications.email.client_id" @input="markSettingsDirty()">
+                                            </div>
+                                        </div>
+                                        <div class="group">
+                                            <label for="graph-client-secret">Client Secret</label>
+                                            <input id="graph-client-secret" type="password" autocomplete="new-password" :placeholder="secretPlaceholder('client_secret', 'Azure AD client secret')" x-model="form.notifications.email.client_secret" @input="markSettingsDirty()" :disabled="isClearing('client_secret')" aria-describedby="graph-secret-hint">
+                                            <span id="graph-secret-hint" class="input-hint">Leave empty to keep, type new value to replace, or click Clear to remove on save.</span>
+                                            <div class="secret-actions">
+                                                <button class="btn" data-variant="danger" data-size="sm" type="button" x-show="secrets.client_secret && !isClearing('client_secret')" @click="clearSecret('client_secret', 'Remove the saved Microsoft Graph client secret on save?')">Clear saved secret</button>
+                                                <button class="btn" data-variant="secondary" data-size="sm" type="button" x-show="isClearing('client_secret')" @click="undoClearSecret('client_secret')">Undo clear</button>
+                                            </div>
+                                        </div>
+                                        <div class="group">
+                                            <label for="graph-from">From Address (Shared Mailbox)</label>
+                                            <input id="graph-from" type="email" placeholder="alerts@company.com" x-model="form.notifications.email.from_address" @input="markSettingsDirty()" aria-describedby="graph-from-hint">
+                                            <span id="graph-from-hint" class="input-hint">Shared mailbox that will send the emails</span>
+                                        </div>
+                                        <div class="group">
+                                            <label for="graph-recipients">Recipients</label>
+                                            <input id="graph-recipients" type="text" placeholder="admin@company.com, tech@company.com" x-model="form.notifications.email.recipients" @input="markSettingsDirty()" aria-describedby="graph-recipients-hint">
+                                            <span id="graph-recipients-hint" class="input-hint">Comma-separated email addresses.</span>
+                                        </div>
+                                        <div class="group">
+                                            <label>Alarms</label>
+                                            <div class="checkbox-group">
+                                                <template x-for="def in defs" :key="def.key">
+                                                    <label class="checkbox-label"><input type="checkbox" :value="def.key" x-model="form.notifications.email.events.alarms" @change="markSettingsDirty()"> <span x-text="def.label"></span></label>
+                                                </template>
+                                                <label class="checkbox-label"><input type="checkbox" x-model="form.notifications.email.events.recoveries" @change="markSettingsDirty()"> Recoveries</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="test-action">
+                                        <button class="btn" data-variant="secondary" data-size="test" type="button" @click="sendTest('email')" :disabled="testStates.email.pending || isClearing('client_secret')" x-text="testStates.email.text">Test</button>
+                                        <span class="input-hint" x-show="isClearing('client_secret')">Save changes first to test with the cleared secret.</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="channel" :class="{ 'channel--open': cardsOpen.zabbix }">
+                                <button type="button" class="channel-head" @click="toggleCard('zabbix')" :aria-expanded="!!cardsOpen.zabbix" aria-controls="channel-zabbix">
+                                    <span class="channel-icon icon-container" x-html="icons.monitoring"></span>
+                                    <span class="channel-titles">
+                                        <span class="channel-name">Zabbix</span>
+                                        <span class="channel-summary" x-text="notifChannelStatus('zabbix').summary"></span>
+                                    </span>
+                                    <span class="channel-status" x-show="notifChannelStatus('zabbix').pill" :class="notifChannelStatus('zabbix').pill?.cls" x-text="notifChannelStatus('zabbix').pill?.label"></span>
+                                    <span class="channel-chevron icon-container" x-html="icons.chevronDown" aria-hidden="true"></span>
+                                </button>
+                                <div class="channel-body" id="channel-zabbix" x-show="cardsOpen.zabbix" x-cloak x-transition:enter="channel-body-enter" x-transition:leave="channel-body-leave">
+                                    <p class="section-desc">Zabbix trapper item that gets the alarm message as its value.</p>
+                                    <div class="form">
+                                        <div class="group">
+                                            <label for="zabbix-server">Server</label>
+                                            <input id="zabbix-server" type="text" placeholder="zabbix.example.com" x-model="form.notifications.zabbix.server" @input="markSettingsDirty()">
+                                        </div>
+                                        <div class="row">
+                                            <div class="group">
+                                                <label for="zabbix-port">Port</label>
+                                                <input id="zabbix-port" type="number" min="1" max="65535" placeholder="10051" x-model.number="form.notifications.zabbix.port" @input="markSettingsDirty()">
+                                            </div>
+                                            <div class="group">
+                                                <label for="zabbix-host">Host</label>
+                                                <input id="zabbix-host" type="text" placeholder="txmon-host" x-model="form.notifications.zabbix.host" @input="markSettingsDirty()">
+                                            </div>
+                                        </div>
+                                        <div class="group">
+                                            <label for="zabbix-key">Key</label>
+                                            <input id="zabbix-key" type="text" placeholder="tex.alarm" x-model="form.notifications.zabbix.key" @input="markSettingsDirty()">
+                                        </div>
+                                        <div class="group">
+                                            <label>Alarms</label>
+                                            <div class="checkbox-group">
+                                                <template x-for="def in defs" :key="def.key">
+                                                    <label class="checkbox-label"><input type="checkbox" :value="def.key" x-model="form.notifications.zabbix.events.alarms" @change="markSettingsDirty()"> <span x-text="def.label"></span></label>
+                                                </template>
+                                                <label class="checkbox-label"><input type="checkbox" x-model="form.notifications.zabbix.events.recoveries" @change="markSettingsDirty()"> Recoveries</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="test-action">
+                                        <button class="btn" data-variant="secondary" data-size="test" type="button" @click="sendTest('zabbix')" :disabled="testStates.zabbix.pending" x-text="testStates.zabbix.text">Test</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="channel" :class="{ 'channel--open': cardsOpen.heartbeat }">
+                                <button type="button" class="channel-head" @click="toggleCard('heartbeat')" :aria-expanded="!!cardsOpen.heartbeat" aria-controls="channel-heartbeat">
+                                    <span class="channel-icon icon-container" x-html="icons.heart"></span>
+                                    <span class="channel-titles">
+                                        <span class="channel-name">Heartbeat</span>
+                                        <span class="channel-summary" x-text="notifChannelStatus('heartbeat').summary"></span>
+                                    </span>
+                                    <span class="channel-status" x-show="notifChannelStatus('heartbeat').pill" :class="notifChannelStatus('heartbeat').pill?.cls" x-text="notifChannelStatus('heartbeat').pill?.label"></span>
+                                    <span class="channel-chevron icon-container" x-html="icons.chevronDown" aria-hidden="true"></span>
+                                </button>
+                                <div class="channel-body" id="channel-heartbeat" x-show="cardsOpen.heartbeat" x-cloak x-transition:enter="channel-body-enter" x-transition:leave="channel-body-leave">
+                                    <p class="section-desc">GET request every minute while txmon runs, for a push monitor such as Uptime Kuma.</p>
+                                    <div class="form">
+                                        <div class="group">
+                                            <label for="heartbeat-url">Push URL</label>
+                                            <input id="heartbeat-url" type="url" :placeholder="secretPlaceholder('heartbeat_url', 'https://status.example.com/api/push/...')" x-model="form.notifications.heartbeat.url" @input="markSettingsDirty()" :disabled="isClearing('heartbeat_url')" aria-describedby="heartbeat-url-hint">
+                                            <span id="heartbeat-url-hint" class="input-hint">Leave empty to keep, type new value to replace, or click Clear to remove on save.</span>
+                                            <div class="secret-actions">
+                                                <button class="btn" data-variant="danger" data-size="sm" type="button" x-show="secrets.heartbeat_url && !isClearing('heartbeat_url')" @click="clearSecret('heartbeat_url', 'Remove the saved heartbeat URL on save?')">Clear saved URL</button>
+                                                <button class="btn" data-variant="secondary" data-size="sm" type="button" x-show="isClearing('heartbeat_url')" @click="undoClearSecret('heartbeat_url')">Undo clear</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Events Panel - issue-first event view -->
+                <div class="panel events-panel" role="tabpanel" id="panel-events" aria-labelledby="tab-events" x-show="settingsTab === 'events'" x-init="$watch('settingsTab', val => val === 'events' && loadEvents())">
+                    <div class="event-summary" :data-state="eventSummaryState()">
+                        <span class="event-summary-main" x-text="eventSummaryText()"></span>
+                        <span class="event-summary-muted" x-text="eventSummaryMutedText()"></span>
+                    </div>
+
+                    <div class="event-list" x-show="attentionItems().length > 0 || events.length > 0">
+                        <template x-if="attentionItems().length > 0">
+                            <div>
+                                <div class="event-section-heading attention">
+                                    <span>Needs attention</span>
+                                    <span class="event-section-count" x-text="attentionItems().length"></span>
+                                </div>
+                                <template x-for="item in attentionItems()" :key="item.key">
+                                    <article class="event-row state-danger">
+                                        <div class="event-row-main">
+                                            <span class="event-state-dot"></span>
+                                            <span class="event-title" x-text="item.title"></span>
+                                            <span class="event-status state-danger" x-text="item.statusText"></span>
+                                        </div>
+                                        <div class="event-row-meta">
+                                            <span class="event-detail" x-show="item.detail" x-text="item.detail"></span>
+                                            <span class="event-when" x-show="item.time" x-text="'since ' + formatRelativeEventTime(item.time)"></span>
+                                        </div>
+                                    </article>
+                                </template>
+                            </div>
+                        </template>
+
+                        <template x-if="events.length > 0">
+                            <div>
+                                <div class="event-section-heading">
+                                    <span>Activity</span>
+                                    <span class="event-section-count" x-text="events.length"></span>
+                                </div>
+                                <template x-for="(event, index) in events" :key="index + event.timestamp">
+                                    <article class="event-row" :class="eventRowStateClass(event)">
+                                        <div class="event-row-main">
+                                            <span class="event-state-dot"></span>
+                                            <span class="event-title" x-text="event.label"></span>
+                                            <span class="event-status" :class="eventRowStateClass(event)" x-text="event.state === 'ok' ? 'Idle' : STATE_LABELS[event.state]"></span>
+                                        </div>
+                                        <div class="event-row-meta">
+                                            <span class="event-detail" x-show="event.value" x-text="event.value"></span>
+                                            <time class="event-when" :datetime="event.timestamp" x-text="formatEventTime(event.timestamp)"></time>
+                                        </div>
+                                    </article>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="event-empty event-error" x-show="eventsError && !eventsLoading">
+                        <p x-text="eventsError"></p>
+                    </div>
+                    <div class="event-empty" x-show="!eventsError && !eventsLoading && attentionItems().length === 0 && events.length === 0">
+                        <p>No events yet</p>
+                    </div>
+                    <div class="event-loading" x-show="eventsLoading">
+                        <p>Loading...</p>
+                    </div>
+                </div>
+
+                <!-- About and attribution -->
+                <div class="panel" role="tabpanel" id="panel-about" aria-labelledby="tab-about" x-show="settingsTab === 'about'">
+                    <div class="about">
+                        <div class="section">
+                            <div class="logo">
+                                <span x-html="icons.appLogo"></span>
+                                <h2>{{.Name}}</h2>
+                            </div>
+                            <div class="info">
+                                <dl class="list">
+                                    <dt>Version</dt>
+                                    <dd x-text="`${version.version || 'dev'} (${(version.commit || 'unknown').slice(0, 7)})`">-</dd>
+                                    <dt>Built</dt>
+                                    <dd x-text="version.build_time || 'unknown'">-</dd>
+                                    <dt>Transmitter</dt>
+                                    <dd x-text="tx ? `Address ${status.address}, firmware ${tx.firmware}` : 'Not connected'">-</dd>
+                                </dl>
+                            </div>
+                            <div class="links">
+                                <a rel="noopener" href="https://github.com/oszuidwest/zwfm-txmon" title="View source code on GitHub" target="_blank">
+                                    <span class="icon-container" x-html="icons.github"></span>
+                                    GitHub
+                                </a>
+                                <a rel="noopener" href="https://github.com/oszuidwest/zwfm-txmon/issues" title="Report bugs or request features" target="_blank">
+                                    <span class="icon-container" x-html="icons.bug"></span>
+                                    Report Issue
+                                </a>
+                                <a rel="noopener" href="https://github.com/oszuidwest/zwfm-txmon/releases" title="View release history and downloads" target="_blank">
+                                    <span class="icon-container" x-html="icons.download"></span>
+                                    Releases
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="section">
+                        <div class="section-header">
+                            <span class="icon-container" x-html="icons.license"></span>
+                            <h3>License</h3>
+                        </div>
+                        <div class="about">
+                            <div class="text">
+                                <p><strong>MIT License</strong></p>
+                                <p>Copyright (c) {{.Year}} Streekomroep ZuidWest</p>
+                                <p>Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:</p>
+                                <p>The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.</p>
+                                <p>THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="section">
+                        <div class="section-header">
+                            <span class="icon-container" x-html="icons.heart"></span>
+                            <h3>Acknowledgements</h3>
+                        </div>
+                        <p class="section-desc">This project is built with the following open source software:</p>
+                        <div class="about">
+                            <div class="text">
+                                <p><a href="https://alpinejs.dev" target="_blank" rel="noopener" title="Visit Alpine.js website"><strong>Alpine.js</strong></a> - MIT License<br>Lightweight JavaScript framework for reactive UI</p>
+                                <p><a href="https://heroicons.com" target="_blank" rel="noopener" title="Visit Heroicons website"><strong>Heroicons</strong></a> - MIT License<br>Beautiful hand-crafted SVG icons by Tailwind Labs</p>
+                                <p><a href="https://github.com/golang/oauth2" target="_blank" rel="noopener" title="View golang.org/x/oauth2 on GitHub"><strong>golang.org/x/oauth2</strong></a> - BSD License<br>OAuth 2.0 client for Microsoft 365 email</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{template "footer" .}}
+    </main>
+</body>
+</html>

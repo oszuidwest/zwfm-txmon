@@ -1,0 +1,41 @@
+---
+# txmon is bare-metal Pi software, so there is no docker job.
+name: Release
+
+"on":
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (edge, vX.Y.Z, or X.Y.Z auto-prefixed)'
+        required: true
+        default: 'edge'
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Checks
+    uses: oszuidwest/.github-templates/.github/workflows/go-ci.yml@v3
+
+  release:
+    needs:
+      - checks
+    uses: oszuidwest/.github-templates/.github/workflows/go-release.yml@v3
+    with:
+      project-name: txmon
+      ldflags-target: main
+      build-matrix: >-
+        [{"os":"linux","arch":"arm64"},
+         {"os":"linux","arch":"arm","arm":"6"}]
+      version: ${{ inputs.version }}
+      allow-tag-rebuild: false
+      release-body: |
+        ## Installation
+
+        Download the binary for your Pi below and follow the installation
+        steps in the README.
+    permissions:
+      contents: write

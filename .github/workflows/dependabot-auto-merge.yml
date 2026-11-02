@@ -1,0 +1,38 @@
+---
+# Arms GitHub native auto-merge (squash) on Dependabot PRs for patch and minor
+# bumps; major bumps are left for manual review. The merge only happens once the
+# main ruleset's required check (`go / Go`) passes, so a failing
+# build keeps the PR open.
+#
+# Depends on two things that live outside this file: the repo setting
+# Settings -> General -> "Allow auto-merge", and the main branch ruleset's
+# required status checks. Without the ruleset there is nothing to wait for and
+# `gh pr merge --auto` errors.
+name: Dependabot auto-merge
+
+"on": pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for patch and minor updates
+        if: >-
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

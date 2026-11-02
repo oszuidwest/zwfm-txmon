@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Sign in to {{.Name}}">
+    <title>{{.Name}}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="canonical" href="/login">
+    <link rel="stylesheet" href="/style.css">
+    <script src="/icons.js" defer="defer"></script>
+    <script src="/login.js" defer="defer"></script>
+</head>
+<body class="page" data-variant="login">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <main id="main-content" class="container" tabindex="-1">
+        <noscript>
+            <p class="noscript-message">This application requires JavaScript to function.</p>
+        </noscript>
+        <section class="card" data-variant="login">
+            <div class="body">
+                <div class="login">
+                    <div class="branding">
+                        <span id="login-logo" class="logo"></span>
+                        <h1 class="title">{{.Name}}</h1>
+                        <p class="subtitle">Sign in to continue</p>
+                    </div>
+
+                    {{if or .Error .Expired}}
+                    <div class="alert" data-variant="danger" role="alert" tabindex="-1" id="login-error">
+                        <span id="warning-icon" class="icon-container" aria-hidden="true"></span>
+                        <div>
+                            {{if .Expired}}
+                            <strong>Sign-in form expired</strong>
+                            <p>Please try again.</p>
+                            {{else}}
+                            <strong>Sign in failed</strong>
+                            <p>{{.Error}}</p>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+
+                    <form method="POST" action="/login" class="form">
+                        <input type="hidden" name="csrf_token" value="{{.FormToken}}">
+                        <div class="group">
+                            <label for="username">Username</label>
+                            <input type="text" id="username" name="username" placeholder="Username" autocomplete="username" required autofocus>
+                        </div>
+                        <div class="group" data-type="password">
+                            <label for="password">Password</label>
+                            <input type="password" id="password" name="password" placeholder="Password" autocomplete="current-password" required>
+                            <button type="button" class="icon-btn toggle" id="password-toggle" aria-label="Show Password">
+                                <span id="eye-icon"></span>
+                            </button>
+                        </div>
+                        <button type="submit" class="btn" data-variant="primary" data-block>Sign in</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        {{template "footer" .}}
+    </main>
+</body>
+</html>

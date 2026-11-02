@@ -1,0 +1,52 @@
+---
+# `go` delegates to go-ci.yml; frontend lint/tests stay inline, as in
+# zwfm-encoder. Pull requests run unfiltered so the `go / Go` and `Frontend`
+# checks always report; a path-filtered run would leave them pending and
+# block merges.
+name: CI
+
+"on":
+  push:
+    branches: ['main']
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.golangci.yml'
+      - 'web/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'biome.json'
+      - '.htmlhintrc'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    uses: oszuidwest/.github-templates/.github/workflows/go-ci.yml@v3
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test JavaScript
+        run: bun run test:js

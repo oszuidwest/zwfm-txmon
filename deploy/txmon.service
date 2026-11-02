@@ -1,0 +1,25 @@
+[Unit]
+Description=ZuidWest FM TEX transmitter monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/txmon -config /etc/txmon/config.json serve
+Restart=always
+RestartSec=3
+
+# Run as dedicated service user (member of gpio, and i2c for the kernel bus)
+User=txmon
+Group=txmon
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# The web interface saves alarm and notification settings here.
+ReadWritePaths=/etc/txmon
+
+[Install]
+WantedBy=multi-user.target
