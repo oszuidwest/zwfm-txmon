@@ -1,7 +1,8 @@
 // Icons and the show-password toggle of the login page, as in zwfm-encoder.
 document.getElementById("login-logo").innerHTML = window.icons.appLogo;
 document.getElementById("github-icon").innerHTML = window.icons.github;
-document.getElementById("eye-icon").innerHTML = window.icons.eye;
+const eyeIcon = document.getElementById("eye-icon");
+eyeIcon.innerHTML = window.icons.eye;
 
 const warningIcon = document.getElementById("warning-icon");
 if (warningIcon) {
@@ -11,7 +12,6 @@ if (warningIcon) {
 
 const passwordInput = document.getElementById("password");
 const toggleBtn = document.getElementById("password-toggle");
-const eyeIcon = document.getElementById("eye-icon");
 
 toggleBtn.addEventListener("click", () => {
     const isPassword = passwordInput.type === "password";

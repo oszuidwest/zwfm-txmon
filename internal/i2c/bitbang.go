@@ -52,9 +52,17 @@ type BitBang struct {
 
 func (b *BitBang) Close() error { return b.p.close() }
 
-func (b *BitBang) Tx(addr uint16, w, r []byte) (err error) {
+// checkAddr rejects addresses that do not fit in 7 bits.
+func checkAddr(addr uint16) error {
 	if addr > 0x7f {
 		return fmt.Errorf("i2c address %d is not 7-bit", addr)
+	}
+	return nil
+}
+
+func (b *BitBang) Tx(addr uint16, w, r []byte) (err error) {
+	if err := checkAddr(addr); err != nil {
+		return err
 	}
 	sleep(time.Until(b.last.Add(tGap)))
 	defer func() {

@@ -21,7 +21,10 @@ const STORAGE_KEYS = {
 
 const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat('en', { numeric: 'always', style: 'narrow' });
 
-const STATE_LABELS = { disabled: 'Disabled', idle: 'Idle', low: 'Alert Low', high: 'Alert High', alarm: 'Alert' };
+// Alarm states, plus 'ok' for an event that clears an alarm.
+const STATE_LABELS = { disabled: 'Disabled', idle: 'Idle', low: 'Alert Low', high: 'Alert High', alarm: 'Alert', ok: 'Idle' };
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const ACTIVE = ['low', 'high', 'alarm'];
 
 // Secrets the server never sends back: their name in the API, then channel and field.
@@ -308,6 +311,11 @@ document.addEventListener('alpine:init', () => {
             ];
         },
 
+        // TEX firmware below 201 takes target power codes for 0..100 % only.
+        legacyPower() {
+            return !!this.tx && this.tx.firmware < 201;
+        },
+
         canControl() {
             return this.connected && this.status.link && this.tx && !this.control.busy;
         },
@@ -548,7 +556,7 @@ document.addEventListener('alpine:init', () => {
             };
             const events = (ch) => {
                 const k = n[ch].events.alarms.length + (n[ch].events.recoveries ? 1 : 0);
-                return `${k} event${k === 1 ? '' : 's'}`;
+                return plural(k, 'event');
             };
             if (name === 'webhook') {
                 if (!hasSecret('webhook_url')) return { summary: 'No URL set', pill: off };
@@ -560,7 +568,7 @@ document.addEventListener('alpine:init', () => {
                     return { summary: 'Not configured', pill: off };
                 }
                 const k = e.recipients.split(',').map(s => s.trim()).filter(Boolean).length;
-                return { summary: `${k} recipient${k === 1 ? '' : 's'}`, pill: null };
+                return { summary: plural(k, 'recipient'), pill: null };
             }
             if (name === 'zabbix') {
                 if (!n.zabbix.server) return { summary: 'No server set', pill: off };
@@ -693,7 +701,7 @@ document.addEventListener('alpine:init', () => {
         eventSummaryMutedText() {
             if (this.eventsError) return 'Could not load events';
             const n = this.events.length;
-            return `${n} event${n === 1 ? '' : 's'} since txmon started`;
+            return `${plural(n, 'event')} since txmon started`;
         },
 
         eventRowStateClass(event) {

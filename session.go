@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 )
@@ -48,12 +49,7 @@ func (s *sessions) login(w http.ResponseWriter, r *http.Request, user, pass stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ip := clientIP(r)
-	recent := s.failures[ip][:0]
-	for _, t := range s.failures[ip] {
-		if time.Since(t) < loginWindow {
-			recent = append(recent, t)
-		}
-	}
+	recent := slices.DeleteFunc(s.failures[ip], func(t time.Time) bool { return time.Since(t) >= loginWindow })
 	s.failures[ip] = recent
 	if len(recent) >= loginAttempts {
 		return false, true

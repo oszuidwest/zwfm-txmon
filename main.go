@@ -69,30 +69,15 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
-	// Flags win over the file: load the file, then apply the flags given.
+	// Flags win over the file: load the file into cfg, then parse the flags
+	// again. They point into cfg and parsed fine the first time.
 	if *configPath != "" {
 		file, err := loadConfig(*configPath)
 		if err != nil {
 			log.Fatal(err)
 		}
-		flags := cfg
 		cfg = file
-		flag.Visit(func(f *flag.Flag) {
-			switch f.Name {
-			case "sda":
-				cfg.SDA = flags.SDA
-			case "scl":
-				cfg.SCL = flags.SCL
-			case "chip":
-				cfg.Chip = flags.Chip
-			case "bus":
-				cfg.Bus = flags.Bus
-			case "addr":
-				cfg.Address = flags.Address
-			case "port":
-				cfg.Port = flags.Port
-			}
-		})
+		_ = flag.CommandLine.Parse(os.Args[1:])
 	}
 	if err := cfg.validate(); err != nil {
 		log.Fatal(err)
@@ -217,7 +202,7 @@ func serve(cfg *Config, configPath string, bus tex.Bus) error {
 	st := &settings{path: configPath, cfg: *cfg}
 	mon := newMonitor(bus, cfg.addr(), st)
 	go mon.Run(ctx)
-	go notify.RunHeartbeat(ctx, func() string { return st.get().Notifications.Heartbeat.URL }, time.Minute)
+	go notify.RunHeartbeat(ctx, func() string { return st.get().Notifications.Heartbeat.URL })
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
