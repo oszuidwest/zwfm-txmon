@@ -57,16 +57,16 @@ func (c *WebhookConfig) send(ctx context.Context, e *Event) error {
 		return fmt.Errorf("webhook: %w", err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !success(resp.StatusCode) {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// RunHeartbeat GETs the URL that pushURL returns every interval until ctx is
+// RunHeartbeat GETs the URL that pushURL returns every minute until ctx is
 // done. An empty URL skips the ping.
-func RunHeartbeat(ctx context.Context, pushURL func() string, interval time.Duration) {
-	ticker := time.NewTicker(interval)
+func RunHeartbeat(ctx context.Context, pushURL func() string) {
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	failing := false
 	for {
@@ -86,7 +86,7 @@ func RunHeartbeat(ctx context.Context, pushURL func() string, interval time.Dura
 		resp, err := httpClient.Do(req)
 		failed := err != nil
 		if err == nil {
-			failed = resp.StatusCode < 200 || resp.StatusCode >= 300
+			failed = !success(resp.StatusCode)
 			_ = resp.Body.Close()
 		}
 		if failed && !failing && ctx.Err() == nil {
@@ -96,3 +96,5 @@ func RunHeartbeat(ctx context.Context, pushURL func() string, interval time.Dura
 		failing = failed
 	}
 }
+
+func success(code int) bool { return code >= 200 && code < 300 }

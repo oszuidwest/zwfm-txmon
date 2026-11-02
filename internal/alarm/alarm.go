@@ -11,48 +11,34 @@ import (
 	"github.com/oszuidwest/zwfm-txmon/internal/tex"
 )
 
-type kind int
-
-const (
-	analog kind = iota // low and/or high limit
-	level              // on/off; notifies when it goes on and when it clears
-	event              // on/off; notifies only when it goes on (panel access)
-)
-
 // Def describes one alarm.
 type Def struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
 	Unit     string `json:"unit,omitempty"`
-	Analog   bool   `json:"analog"`
+	Analog   bool   `json:"analog"` // low and/or high limit; the others are on or off
 	HighOnly bool   `json:"high_only,omitempty"`
-	kind     kind
+	event    bool   // on/off alarm that notifies only when it goes on (panel access)
 	value    func(*tex.Telemetry) float64
 	on       func(*tex.Telemetry) bool
 }
 
 // Defs are the alarms for a TEX.
 var Defs = []Def{
-	{Key: "forward_power", Label: "Forward Power", Unit: "W", kind: analog, value: func(t *tex.Telemetry) float64 { return t.ForwardW }},
-	{Key: "reflected_power", Label: "Reflected Power", Unit: "W", HighOnly: true, kind: analog, value: func(t *tex.Telemetry) float64 { return t.ReflectedW }},
-	{Key: "temperature", Label: "Temperature", Unit: "°C", kind: analog, value: func(t *tex.Telemetry) float64 { return float64(t.TemperatureC) }},
-	{Key: "modulation", Label: "Modulation", Unit: "kHz", kind: analog, value: func(t *tex.Telemetry) float64 { return float64(t.ModulationKHz) }},
-	{Key: "pll_lock_loss", Label: "PLL Lock Loss", kind: level, on: func(t *tex.Telemetry) bool { return !t.PLLLocked }},
-	{Key: "audio_loss", Label: "Audio Loss", kind: level, on: func(t *tex.Telemetry) bool { return t.AudioLoss }},
-	{Key: "swr", Label: "SWR Alarm", kind: level, on: func(t *tex.Telemetry) bool { return t.SWRAlarm }},
-	{Key: "foldback", Label: "FoldBack", kind: level, on: func(t *tex.Telemetry) bool { return t.Foldback }},
-	{Key: "panel_access", Label: "Panel Access", kind: event, on: func(t *tex.Telemetry) bool { return t.PanelAccess }},
-	{Key: LinkLoss, Label: "Link Loss", kind: level},
+	{Key: "forward_power", Label: "Forward Power", Unit: "W", Analog: true, value: func(t *tex.Telemetry) float64 { return t.ForwardW }},
+	{Key: "reflected_power", Label: "Reflected Power", Unit: "W", HighOnly: true, Analog: true, value: func(t *tex.Telemetry) float64 { return t.ReflectedW }},
+	{Key: "temperature", Label: "Temperature", Unit: "°C", Analog: true, value: func(t *tex.Telemetry) float64 { return float64(t.TemperatureC) }},
+	{Key: "modulation", Label: "Modulation", Unit: "kHz", Analog: true, value: func(t *tex.Telemetry) float64 { return float64(t.ModulationKHz) }},
+	{Key: "pll_lock_loss", Label: "PLL Lock Loss", on: func(t *tex.Telemetry) bool { return !t.PLLLocked }},
+	{Key: "audio_loss", Label: "Audio Loss", on: func(t *tex.Telemetry) bool { return t.AudioLoss }},
+	{Key: "swr", Label: "SWR Alarm", on: func(t *tex.Telemetry) bool { return t.SWRAlarm }},
+	{Key: "foldback", Label: "FoldBack", on: func(t *tex.Telemetry) bool { return t.Foldback }},
+	{Key: "panel_access", Label: "Panel Access", event: true, on: func(t *tex.Telemetry) bool { return t.PanelAccess }},
+	{Key: LinkLoss, Label: "Link Loss"},
 }
 
 // LinkLoss is the alarm for losing contact with the TEX.
 const LinkLoss = "link_loss"
-
-func init() {
-	for i := range Defs {
-		Defs[i].Analog = Defs[i].kind == analog
-	}
-}
 
 // Setting configures one alarm. Analog alarms use Low and High; the others
 // use Enabled. Trigger and release delays (3..60 s) only apply to analog
@@ -86,7 +72,7 @@ func Defaults() Config {
 func (c Config) Validate() error {
 	for _, d := range Defs {
 		s := c[d.Key]
-		if d.kind != analog || !s.Low && !s.High {
+		if !d.Analog || !s.Low && !s.High {
 			continue
 		}
 		switch {
@@ -151,7 +137,7 @@ func (e *Engine) Update(cfg Config, now time.Time, t *tex.Telemetry) []notify.Ev
 		e.running = time.Time{}
 		for key, m := range e.mons {
 			if key != LinkLoss {
-				*m = monitor{state: "idle", count: m.count, lastConfig: m.lastConfig}
+				m.idle()
 			}
 		}
 	}
@@ -159,7 +145,8 @@ func (e *Engine) Update(cfg Config, now time.Time, t *tex.Telemetry) []notify.Ev
 		d := &Defs[i]
 		m, s := e.mons[d.Key], cfg[d.Key]
 		if s != m.lastConfig { // a changed setting starts the alarm over
-			*m = monitor{state: "idle", count: m.count, lastConfig: s}
+			m.lastConfig = s
+			m.idle()
 		}
 		if d.Key == LinkLoss {
 			if s.Enabled {
@@ -171,9 +158,9 @@ func (e *Engine) Update(cfg Config, now time.Time, t *tex.Telemetry) []notify.Ev
 			continue
 		}
 		switch {
-		case d.kind == analog && (s.Low || s.High):
+		case d.Analog && (s.Low || s.High):
 			events = append(events, m.analog(d, s, now, d.value(t))...)
-		case d.kind != analog && s.Enabled:
+		case !d.Analog && s.Enabled:
 			events = append(events, m.digital(d, now, d.on(t))...)
 		}
 	}
@@ -230,8 +217,8 @@ func (m *monitor) digital(d *Def, now time.Time, on bool) []notify.Event {
 	case !elapsed(&m.lowSince, now, digitalDelay):
 	case m.state == "idle":
 		return m.fire(d, now, "alarm", "")
-	case d.kind == event:
-		*m = monitor{state: "idle", count: m.count, lastConfig: m.lastConfig} // re-arm silently
+	case d.event:
+		m.idle() // re-arm silently
 	default:
 		return m.clear(d, now, "")
 	}
@@ -243,14 +230,19 @@ func (m *monitor) fire(d *Def, now time.Time, state, value string) []notify.Even
 	return []notify.Event{{Alarm: d.Key, Label: d.Label, State: state, Value: value, Time: now}}
 }
 
-func (m *monitor) clear(d *Def, now time.Time, value string) []notify.Event {
+// idle resets the monitor, keeping its count and settings.
+func (m *monitor) idle() {
 	*m = monitor{state: "idle", count: m.count, lastConfig: m.lastConfig}
+}
+
+func (m *monitor) clear(d *Def, now time.Time, value string) []notify.Event {
+	m.idle()
 	return []notify.Event{{Alarm: d.Key, Label: d.Label, State: "ok", Value: value, Time: now}}
 }
 
 // States returns the state of every alarm, in the order of Defs.
 func (e *Engine) States(cfg Config) []State {
-	var out []State
+	out := make([]State, 0, len(Defs))
 	for _, d := range Defs {
 		s, m := cfg[d.Key], e.mons[d.Key]
 		st := m.state

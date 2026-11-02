@@ -50,8 +50,8 @@ func (b *Bus) Close() error { return b.f.Close() }
 // Tx writes w and then reads len(r) bytes after a repeated start. Either may
 // be empty. Transactions are spaced 50 ms apart, as with BitBang.
 func (b *Bus) Tx(addr uint16, w, r []byte) error {
-	if addr > 0x7f {
-		return fmt.Errorf("i2c address %d is not 7-bit", addr)
+	if err := checkAddr(addr); err != nil {
+		return err
 	}
 	if len(w) > 0xffff || len(r) > 0xffff {
 		return fmt.Errorf("i2c message longer than %d bytes", 0xffff)

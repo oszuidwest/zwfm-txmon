@@ -58,7 +58,7 @@
                  :data-type="toast.type"
                  x-transition:enter="toast-enter"
                  x-transition:leave="toast-leave">
-                <span class="toast-icon" x-html="toast.type === 'success' ? icons.check : toast.type === 'error' ? icons.warning : icons.info"></span>
+                <span class="toast-icon" x-html="toast.type === 'success' ? icons.check : icons.warning"></span>
                 <span x-text="toast.message"></span>
             </div>
         </template>
@@ -180,12 +180,12 @@
                             <label for="target-power">Target Power</label>
                             <div class="copy-field">
                                 <div class="input-group">
-                                    <input id="target-power" type="number" min="0" :max="tx && tx.firmware < 201 ? 100 : 120" step="1" :placeholder="tx ? tx.target_power_pct : ''" x-model.number="control.power" @keydown.enter.prevent="setPower()" aria-describedby="target-power-hint">
+                                    <input id="target-power" type="number" min="0" :max="legacyPower() ? 100 : 120" step="1" :placeholder="tx ? tx.target_power_pct : ''" x-model.number="control.power" @keydown.enter.prevent="setPower()" aria-describedby="target-power-hint">
                                     <span class="input-unit">%</span>
                                 </div>
                                 <button class="btn" data-variant="secondary" type="button" :disabled="!canControl() || control.power === ''" @click="setPower()">Set</button>
                             </div>
-                            <span id="target-power-hint" class="input-hint" x-text="tx && tx.firmware < 201 ? 'TEX firmware below 201 accepts 0 to 100 %.' : '0 to 120 % of the rated power.'"></span>
+                            <span id="target-power-hint" class="input-hint" x-text="legacyPower() ? 'TEX firmware below 201 accepts 0 to 100 %.' : '0 to 120 % of the rated power.'"></span>
                         </div>
                         <div class="group">
                             <label for="frequency">Frequency</label>
@@ -486,12 +486,12 @@
                         <span class="event-summary-muted" x-text="eventSummaryMutedText()"></span>
                     </div>
 
-                    <div class="event-list" x-show="attentionItems().length > 0 || events.length > 0">
-                        <template x-if="attentionItems().length > 0">
+                    <div class="event-list" x-show="activeAlarms().length > 0 || events.length > 0">
+                        <template x-if="activeAlarms().length > 0">
                             <div>
                                 <div class="event-section-heading attention">
                                     <span>Needs attention</span>
-                                    <span class="event-section-count" x-text="attentionItems().length"></span>
+                                    <span class="event-section-count" x-text="activeAlarms().length"></span>
                                 </div>
                                 <template x-for="item in attentionItems()" :key="item.key">
                                     <article class="event-row state-danger">
@@ -520,7 +520,7 @@
                                         <div class="event-row-main">
                                             <span class="event-state-dot"></span>
                                             <span class="event-title" x-text="event.label"></span>
-                                            <span class="event-status" :class="eventRowStateClass(event)" x-text="event.state === 'ok' ? 'Idle' : STATE_LABELS[event.state]"></span>
+                                            <span class="event-status" :class="eventRowStateClass(event)" x-text="STATE_LABELS[event.state]"></span>
                                         </div>
                                         <div class="event-row-meta">
                                             <span class="event-detail" x-show="event.value" x-text="event.value"></span>
@@ -535,7 +535,7 @@
                     <div class="event-empty event-error" x-show="eventsError && !eventsLoading">
                         <p x-text="eventsError"></p>
                     </div>
-                    <div class="event-empty" x-show="!eventsError && !eventsLoading && attentionItems().length === 0 && events.length === 0">
+                    <div class="event-empty" x-show="!eventsError && !eventsLoading && activeAlarms().length === 0 && events.length === 0">
                         <p>No events yet</p>
                     </div>
                     <div class="event-loading" x-show="eventsLoading">

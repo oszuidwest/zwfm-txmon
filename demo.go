@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/binary"
-	"errors"
 	"math/rand/v2"
 	"sync"
+
+	"github.com/oszuidwest/zwfm-txmon/internal/i2c"
 )
 
 const demoAddr = 5
@@ -33,7 +34,7 @@ func (b *demoBus) Close() error { return nil }
 
 func (b *demoBus) Tx(addr uint16, w, r []byte) error {
 	if addr != demoAddr {
-		return errors.New("no ACK from slave")
+		return i2c.ErrNack
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()

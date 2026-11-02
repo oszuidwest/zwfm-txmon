@@ -38,12 +38,9 @@ func defaultConfig() Config {
 	return Config{Name: "TEX", Port: 8080, Username: "admin", SDA: 2, SCL: 3, Bus: -1, Alarms: alarm.Defaults()}
 }
 
-// loadConfig reads path over the defaults. An empty path gives the defaults.
+// loadConfig reads path over the defaults.
 func loadConfig(path string) (Config, error) {
 	cfg := defaultConfig()
-	if path == "" {
-		return cfg, nil
-	}
 	b, err := os.ReadFile(path) //nolint:gosec // the operator chooses the config file
 	if err != nil {
 		return cfg, err

@@ -44,7 +44,6 @@ var families = map[int]struct {
 	len  int
 }{
 	1:    {"PTX-LCD/PTX-DDS/PTX-LCDDSP", 0x90},
-	10:   {"TEX-LCD or BLUES", 0x40},
 	0x84: {"PJ amplifier", 0x60},
 }
 

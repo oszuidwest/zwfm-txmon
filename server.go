@@ -16,7 +16,6 @@ import (
 )
 
 type server struct {
-	cfg      Config
 	settings *settings
 	mon      *Monitor
 	sessions *sessions
@@ -31,7 +30,7 @@ type pageData struct {
 }
 
 func newServer(st *settings, mon *Monitor) *server {
-	return &server{cfg: st.get(), settings: st, mon: mon, sessions: newSessions(), pages: template.Must(template.ParseFS(webFS, "web/*.html"))}
+	return &server{settings: st, mon: mon, sessions: newSessions(), pages: template.Must(template.ParseFS(webFS, "web/*.html"))}
 }
 
 func (s *server) routes() http.Handler {
@@ -88,7 +87,7 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) page(w http.ResponseWriter, status int, name string, d *pageData) {
-	d.Name, d.Version, d.Year = s.cfg.Name, Version, time.Now().Year()
+	d.Name, d.Version, d.Year = s.settings.get().Name, Version, time.Now().Year()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
@@ -124,7 +123,8 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?expired=1", http.StatusSeeOther)
 		return
 	}
-	ok, limited := s.sessions.login(w, r, r.PostForm.Get("username"), r.PostForm.Get("password"), &s.cfg)
+	cfg := s.settings.get()
+	ok, limited := s.sessions.login(w, r, r.PostForm.Get("username"), r.PostForm.Get("password"), &cfg)
 	if limited {
 		slog.Warn("login rate limited", "remote", clientIP(r))
 		s.loginPage(w, r, http.StatusTooManyRequests, &pageData{Error: "Too many attempts. Try again in a few minutes."})
@@ -233,39 +233,37 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	var b strings.Builder
 	fmt.Fprintf(&b, "tex_link %d\n", b2i(st.Link))
-	defer func() { _, _ = io.WriteString(w, b.String()) }()
-	t := st.Telemetry
-	if t == nil {
-		return
+	if t := st.Telemetry; t != nil {
+		for _, m := range []struct {
+			name string
+			v    float64
+		}{
+			{"tex_firmware", float64(t.Firmware)},
+			{"tex_frequency_mhz", t.FrequencyMHz},
+			{"tex_target_power_pct", float64(t.TargetPct)},
+			{"tex_forward_power_watts", t.ForwardW},
+			{"tex_reflected_power_watts", t.ReflectedW},
+			{"tex_temperature_celsius", float64(t.TemperatureC)},
+			{"tex_modulation_khz", float64(t.ModulationKHz)},
+			{"tex_deviation_left_khz", float64(t.DeviationLKHz)},
+			{"tex_deviation_right_khz", float64(t.DeviationRKHz)},
+			{"tex_pa_voltage_volts", t.PAVoltage},
+			{"tex_pa_current_amperes", t.PACurrent},
+			{"tex_efficiency_pct", float64(t.EfficiencyPct)},
+			{"tex_on_air", float64(b2i(t.OnAir))},
+			{"tex_power_set_ok", float64(b2i(t.PowerSetOK))},
+			{"tex_pll_locked", float64(b2i(t.PLLLocked))},
+			{"tex_foldback", float64(b2i(t.Foldback))},
+			{"tex_interlock", float64(b2i(t.Interlock))},
+			{"tex_audio_loss", float64(b2i(t.AudioLoss))},
+			{"tex_swr_alarm", float64(b2i(t.SWRAlarm))},
+			{"tex_panel_access", float64(b2i(t.PanelAccess))},
+			{"tex_last_update_seconds", float64(st.Updated.Unix())},
+		} {
+			fmt.Fprintf(&b, "%s %g\n", m.name, m.v)
+		}
 	}
-	for _, m := range []struct {
-		name string
-		v    float64
-	}{
-		{"tex_firmware", float64(t.Firmware)},
-		{"tex_frequency_mhz", t.FrequencyMHz},
-		{"tex_target_power_pct", float64(t.TargetPct)},
-		{"tex_forward_power_watts", t.ForwardW},
-		{"tex_reflected_power_watts", t.ReflectedW},
-		{"tex_temperature_celsius", float64(t.TemperatureC)},
-		{"tex_modulation_khz", float64(t.ModulationKHz)},
-		{"tex_deviation_left_khz", float64(t.DeviationLKHz)},
-		{"tex_deviation_right_khz", float64(t.DeviationRKHz)},
-		{"tex_pa_voltage_volts", t.PAVoltage},
-		{"tex_pa_current_amperes", t.PACurrent},
-		{"tex_efficiency_pct", float64(t.EfficiencyPct)},
-		{"tex_on_air", float64(b2i(t.OnAir))},
-		{"tex_power_set_ok", float64(b2i(t.PowerSetOK))},
-		{"tex_pll_locked", float64(b2i(t.PLLLocked))},
-		{"tex_foldback", float64(b2i(t.Foldback))},
-		{"tex_interlock", float64(b2i(t.Interlock))},
-		{"tex_audio_loss", float64(b2i(t.AudioLoss))},
-		{"tex_swr_alarm", float64(b2i(t.SWRAlarm))},
-		{"tex_panel_access", float64(b2i(t.PanelAccess))},
-		{"tex_last_update_seconds", float64(st.Updated.Unix())},
-	} {
-		fmt.Fprintf(&b, "%s %g\n", m.name, m.v)
-	}
+	_, _ = io.WriteString(w, b.String())
 }
 
 func b2i(b bool) int {
