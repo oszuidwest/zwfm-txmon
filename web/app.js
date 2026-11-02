@@ -34,6 +34,20 @@ const SECRETS = {
     heartbeat_url: ['heartbeat', 'url'],
 };
 
+// A distinct icon per alarm card.
+const ALARM_ICONS = {
+    forward_power: 'bolt',
+    reflected_power: 'arrowUturnLeft',
+    temperature: 'fire',
+    modulation: 'metering',
+    pll_lock_loss: 'lockOpen',
+    audio_loss: 'silence',
+    swr: 'warning',
+    foldback: 'arrowTrendingDown',
+    panel_access: 'adjustments',
+    link_loss: 'link',
+};
+
 const ALARM_DESCRIPTIONS = {
     forward_power: 'Alert when the forward power stays below or above a limit.',
     reflected_power: 'Alert when the reflected power stays above a limit.',
@@ -462,9 +476,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         alarmIcon(def) {
-            if (def.key === 'link_loss') return 'link';
-            if (def.unit === 'W') return 'power';
-            return def.analog ? 'metering' : 'warning';
+            return ALARM_ICONS[def.key];
         },
 
         alarmDescription(def) {
